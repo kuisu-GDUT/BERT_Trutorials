@@ -62,17 +62,8 @@ class ClassificeCola():
         # tokenizer
         logging.info("|token|loading bert tokenizer...")
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-        max_len = 0
-        # For every sentence...
-        for sent in sentences:
-            # Tokenize the text and add `[CLS]` and `[SEP]` tokens.
-            input_ids = tokenizer.encode(sent, add_special_tokens=True)
-
-            # Update the maximum sentence length.
-            max_len = max(max_len, len(input_ids))
         input_ids = []
         attention_masks = []
-        logging.info(f"|token|max len:{max_len}")
 
         # For every sentence...
         for sent in sentences:
@@ -102,8 +93,6 @@ class ClassificeCola():
         # split data
         # Combine the training inputs into a TensorDataset. -->与zip类似
         dataset = TensorDataset(input_ids, attention_masks, labels)
-
-        # Create a 90-10 train-validation split.
 
         # Calculate the number of samples to include in each set.
         train_size = int(0.9 * len(dataset))
@@ -182,11 +171,6 @@ class ClassificeCola():
         epochs = wandb.config.epochs
         # For each epoch...
         for epoch_i in range(0, epochs):
-
-            # ========================================
-            #               Training
-            # ========================================
-
             logging.info('|train|======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
             logging.info('|train|Training...')
 
