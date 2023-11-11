@@ -158,7 +158,6 @@ class ClassificeCola():
             num_warmup_steps=0,  # Default value in run_glue.py
             num_training_steps=total_steps)
 
-
         # Set the seed value all over the place to make this reproducible.
         wandb.init()
         # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -188,11 +187,8 @@ class ClassificeCola():
             #               Training
             # ========================================
 
-            # Perform one full pass over the training set.
-
-            print("")
-            print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
-            print('Training...')
+            logging.info('|train|======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
+            logging.info('|train|Training...')
 
             # Measure how long the training epoch takes.
             t0 = time.time()
@@ -200,15 +196,10 @@ class ClassificeCola():
             # Reset the total loss for this epoch.
             total_train_loss = 0
 
-            # Put the model into training mode. Don't be mislead--the call to
-            # `train` just changes the *mode*, it doesn't *perform* the training.
-            # `dropout` and `batchnorm` layers behave differently during training
-            # vs. test (source: https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch)
             model.train()
 
             # For each batch of training data...
             for step, batch in enumerate(train_dataloader):
-
                 # Progress update every 40 batches.
                 if step % 40 == 0 and not step == 0:
                     # Calculate elapsed time in minutes.
@@ -217,54 +208,25 @@ class ClassificeCola():
                     # Report progress.
                     logging.info(f'|train|Batch {step}  of  {len(train_dataloader)}.    Elapsed: {elapsed}.')
 
-                # Unpack this training batch from our dataloader.
-                #
-                # As we unpack the batch, we'll also copy each tensor to the GPU using the
-                # `to` method.
-                #
-                # `batch` contains three pytorch tensors:
-                #   [0]: input ids
-                #   [1]: attention masks
-                #   [2]: labels
                 b_input_ids = batch[0].to(device)
                 b_input_mask = batch[1].to(device)
                 b_labels = batch[2].to(device)
 
-                # Always clear any previously calculated gradients before performing a
-                # backward pass. PyTorch doesn't do this automatically because
-                # accumulating the gradients is "convenient while training RNNs".
-                # (source: https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch)
                 model.zero_grad()
 
-                # Perform a forward pass (evaluate the model on this training batch).
-                # The documentation for this `model` function is here:
-                # https://huggingface.co/transformers/v2.2.0/model_doc/bert.html#transformers.BertForSequenceClassification
-                # It returns different numbers of parameters depending on what arguments
-                # arge given and what flags are set. For our useage here, it returns
-                # the loss (because we provided labels) and the "logits"--the model
-                # outputs prior to activation.
                 outputs = model(b_input_ids,
-                                     token_type_ids=None,
-                                     attention_mask=b_input_mask,
-                                     labels=b_labels)
+                                token_type_ids=None,
+                                attention_mask=b_input_mask,
+                                labels=b_labels)
                 loss, logits = outputs.loss, outputs.logits
                 wandb.log({'train_batch_loss': loss.item()})
-                # Accumulate the training loss over all the batches so that we can
-                # calculate the average loss at the end. `loss` is a Tensor containing a
-                # single value; the `.item()` function just returns the Python value
-                # from the tensor.
                 total_train_loss += loss.item()
 
                 # Perform a backward pass to calculate the gradients.
                 loss.backward()
 
-                # Clip the norm of the gradients to 1.0.
-                # This is to help prevent the "exploding gradients" problem.
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
-                # Update parameters and take a step using the computed gradient.
-                # The optimizer dictates the "update rule"--how the parameters are
-                # modified based on their gradients, the learning rate, etc.
                 optimizer.step()
 
                 # Update the learning rate.
@@ -278,23 +240,14 @@ class ClassificeCola():
 
             wandb.log({'avg_train_loss': avg_train_loss})
 
-            logging.info("")
-            logging.info("  Average training loss: {0:.2f}".format(avg_train_loss))
-            logging.info("  Training epcoh took: {:}".format(training_time))
+            logging.info("|train|Average training loss: {0:.2f}".format(avg_train_loss))
+            logging.info("|train|Training epoch took: {:}".format(training_time))
 
             # ========================================
             #               Validation
             # ========================================
-            # After the completion of each training epoch, measure our performance on
-            # our validation set.
-
-            logging.info("")
-            logging.info("Running Validation...")
-
+            logging.info("|train|Running Validation...")
             t0 = time.time()
-
-            # Put the model in evaluation mode--the dropout layers behave differently
-            # during evaluation.
             model.eval()
 
             # Tracking variables
@@ -304,15 +257,6 @@ class ClassificeCola():
 
             # Evaluate data for one epoch
             for batch in validation_dataloader:
-                # Unpack this training batch from our dataloader.
-                #
-                # As we unpack the batch, we'll also copy each tensor to the GPU using
-                # the `to` method.
-                #
-                # `batch` contains three pytorch tensors:
-                #   [0]: input ids
-                #   [1]: attention masks
-                #   [2]: labels
                 b_input_ids = batch[0].to(device)
                 b_input_mask = batch[1].to(device)
                 b_labels = batch[2].to(device)
@@ -320,17 +264,11 @@ class ClassificeCola():
                 # Tell pytorch not to bother with constructing the computed graph during
                 # the forward pass, since this is only needed for backprop (training).
                 with torch.no_grad():
-                    # Forward pass, calculate logit predictions.
-                    # token_type_ids is the same as the "segment ids", which
-                    # differentiates sentence 1 and 2 in 2-sentence tasks.
-                    # The documentation for this `model` function is here:
-                    # https://huggingface.co/transformers/v2.2.0/model_doc/bert.html#transformers.BertForSequenceClassification
-                    # Get the "logits" output by the model. The "logits" are the output
-                    # values prior to applying an activation function like the softmax.
-                    (loss, logits) = model(b_input_ids,
-                                           token_type_ids=None,
-                                           attention_mask=b_input_mask,
-                                           labels=b_labels)
+                    outputs = model(b_input_ids,
+                                    token_type_ids=None,
+                                    attention_mask=b_input_mask,
+                                    labels=b_labels)
+                    (loss, logits) = outputs.loss, outputs.logits
 
                 # Accumulate the validation loss.
                 total_eval_loss += loss.item()
@@ -354,7 +292,7 @@ class ClassificeCola():
             validation_time = self.format_time(time.time() - t0)
             wandb.log({'val_accuracy': avg_val_accuracy, 'avg_val_loss': avg_val_loss})
             logging.info("Validation Loss: {0:.2f}".format(avg_val_loss))
-            logging.info(("Validation took: {:}".format(validation_time)))
+            logging.info("Validation took: {:}".format(validation_time))
 
             # Record all statistics from this epoch.
             training_stats.append(
@@ -395,7 +333,6 @@ class ClassificeCola():
         sentences, labels = self.load_data()
         train_dataloader, validation_dataloader = self.create_token_data(sentences, labels)
         self.train(train_dataloader, validation_dataloader)
-
 
 
 if __name__ == '__main__':
