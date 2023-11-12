@@ -13,7 +13,7 @@ import math
 import time
 from tqdm import tqdm
 
-from models.seq2seq import Seq2Seq, Encoder, Decoder
+
 
 logging.basicConfig(level=logging.INFO, filename="seq2seq.log")
 
@@ -78,6 +78,8 @@ class Seq2SeqRun():
 
     def model(self, input_dim, output_dim, device="cpu"):
         # crete model
+        from models.seq2seq import Seq2Seq, Encoder, Decoder
+
         INPUT_DIM = input_dim
         OUTPUT_DIM = output_dim
         ENC_EMB_DIM = 256
@@ -100,13 +102,40 @@ class Seq2SeqRun():
         logging.info(f"model structure:\{model}")
         return model
 
+    def model_gru(self, input_dim, output_dim, device="cpu"):
+        # crete model
+        from models.seq2seq_gru import Seq2Seq, Encoder, Decoder, Attention
+        INPUT_DIM = input_dim
+        OUTPUT_DIM = output_dim
+        ENC_EMB_DIM = 256
+        DEC_EMB_DIM = 256
+        ENC_HID_DIM = 512
+        DEC_HID_DIM = 512
+        N_LAYERS = 2
+        ENC_DROPOUT = 0.5
+        DEC_DROPOUT = 0.5
+
+        attn = Attention(ENC_HID_DIM, DEC_HID_DIM)
+        enc = Encoder(INPUT_DIM, ENC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, ENC_DROPOUT)
+        dec = Decoder(OUTPUT_DIM, DEC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, DEC_DROPOUT, attn)
+
+        model = Seq2Seq(enc, dec, device).to(device)
+
+        def init_weights(m):
+            for name, param in m.named_parameters():
+                nn.init.uniform_(param.data, -0.08, 0.08)
+
+        model.apply(init_weights)
+        logging.info(f"model structure:\{model}")
+        return model
+
     def train(self, model, iterator, optimizer, criterion, clip):
 
         model.train()
 
         epoch_loss = 0
 
-        for i, batch in tqdm(enumerate(iterator)):
+        for i, batch in enumerate(iterator):
             src = batch.src
             trg = batch.trg
 
@@ -134,6 +163,7 @@ class Seq2SeqRun():
             optimizer.step()
 
             epoch_loss += loss.item()
+            if i % 5 == 0: logging.info(f"|train|epoch: {i}-> loss: {epoch_loss / (i + 1)}")
 
         return epoch_loss / len(iterator)
 
@@ -164,6 +194,7 @@ class Seq2SeqRun():
                 loss = criterion(output, trg)
 
                 epoch_loss += loss.item()
+        logging.info(f"|eval|loss: {epoch_loss / len(iterator)}")
 
         return epoch_loss / len(iterator)
 
@@ -191,15 +222,16 @@ class Seq2SeqRun():
             (train_data, valid_data, test_data),
             batch_size=BATCH_SIZE,
             device=device)
-        model = self.model(len(SRC.vocab), len(TRG.vocab), device=device)
+        model = self.model_gru(len(SRC.vocab), len(TRG.vocab), device=device)
         optimizer = optim.Adam(model.parameters())
         TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
 
-        criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX) # 将pad的损失设置为0
+        criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)  # 将pad的损失设置为0
 
         N_EPOCHS = 2
         CLIP = 1
         best_valid_loss = float('inf')
+        logging.info(f"|train|start ...")
 
         for epoch in tqdm(range(N_EPOCHS)):
 
