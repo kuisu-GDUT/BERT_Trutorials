@@ -1,8 +1,10 @@
+import logging
 import random
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, emb_dim, enc_hid_dim, dec_hid_dim, dropout):
@@ -30,29 +32,39 @@ class Encoder(nn.Module):
         hidden = torch.tanh(self.fc(torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)))
         return outputs, hidden
 
+
 class Attention(nn.Module):
     def __init__(self, enc_hid_dim, dec_hid_dim):
         super().__init__()
 
-        self.attn = nn.Linear(enc_hid_dim * 2 + dec_hid_dim, dec_hid_dim)
+        self.attn = nn.Linear((enc_hid_dim * 2) + dec_hid_dim, dec_hid_dim)
         self.v = nn.Linear(dec_hid_dim, 1, bias=False)
 
     def forward(self, hidden, encoder_outputs):
         # hidden = [batch size, dec hid dim]
-        # encoder_outputs = [src len, batch size, enc hid dim*2]
+        # encoder_outputs = [src len, batch size, enc hid dim * 2]
+
         batch_size = encoder_outputs.shape[1]
         src_len = encoder_outputs.shape[0]
 
         # repeat decoder hidden state src_len times
         hidden = hidden.unsqueeze(1).repeat(1, src_len, 1)
+
         encoder_outputs = encoder_outputs.permute(1, 0, 2)
+
         # hidden = [batch size, src len, dec hid dim]
-        # encoder_outputs = [batch size, src len, enc hid dim*2]
+        # encoder_outputs = [batch size, src len, enc hid dim * 2]
+
         energy = torch.tanh(self.attn(torch.cat((hidden, encoder_outputs), dim=2)))
+
         # energy = [batch size, src len, dec hid dim]
+
         attention = self.v(energy).squeeze(2)
-        # attention = [batch size, src len]
+
+        # attention= [batch size, src len]
+
         return F.softmax(attention, dim=1)
+
 
 class Decoder(nn.Module):
     def __init__(self, output_dim, emb_dim, enc_hid_dim, dec_hid_dim, dropout, attention):
@@ -61,22 +73,22 @@ class Decoder(nn.Module):
         self.attention = attention
 
         self.embedding = nn.Embedding(output_dim, emb_dim)
-        self.rnn = nn.GRU(enc_hid_dim*2+emb_dim,dec_hid_dim)
-        self.fc_out = nn.Linear(enc_hid_dim*2+dec_hid_dim+emb_dim,output_dim)
+        self.rnn = nn.GRU(enc_hid_dim * 2 + emb_dim, dec_hid_dim)
+        self.fc_out = nn.Linear(enc_hid_dim * 2 + dec_hid_dim + emb_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, input, hidden, encoder_outputs):
         # input = [batch size]
         # hidden = [batch size, dec hid dim]
         # encoder_outputs = [src len, batch size, enc hid dim*2]
-        input = input.unsqueeze(0) # [1, batch size]
-        embedded = self.dropout(self.embedding(input)) # [1, batch size, emb dim]
-        a = self.attention(hidden, encoder_outputs) # [batch size, src len]
-        a = a.unsqueeze(1)# [batch size,1 , src len]
-        encoder_outputs = encoder_outputs.permute(1,0,2)# [batch size, src len, enc hid dim*2]
-        weighted = torch.bmm(a, encoder_outputs) # (batch size, 1, enc hid dim*2)
-        weighted = weighted.permute(1,0,2) # (1, batch size, enc hid dim *2)
-        rnn_input = torch.cat((embedded, weighted), dim=2) # (1, batch size, (enc hid dim*2) + emb dim)
+        input = input.unsqueeze(0)  # [1, batch size]
+        embedded = self.dropout(self.embedding(input))  # [1, batch size, emb dim]
+        a = self.attention(hidden, encoder_outputs)  # [batch size, src len]
+        a = a.unsqueeze(1)  # [batch size,1 , src len]
+        encoder_outputs = encoder_outputs.permute(1, 0, 2)  # [batch size, src len, enc hid dim*2]
+        weighted = torch.bmm(a, encoder_outputs)  # (batch size, 1, enc hid dim*2)
+        weighted = weighted.permute(1, 0, 2)  # (1, batch size, enc hid dim *2)
+        rnn_input = torch.cat((embedded, weighted), dim=2)  # (1, batch size, (enc hid dim*2) + emb dim)
         output, hidden = self.rnn(rnn_input, hidden.unsqueeze(0))
         # output = [seq len, batch size, dec hid dim * n directions]
         # hidden = [n layers*n directions, batch size, dec hid dim]
@@ -85,15 +97,21 @@ class Decoder(nn.Module):
         # output = [1, batch size, dec hid dim]
         # hidden = [1, batch size, dec hid dim]
         # this also means that output == hidden
-        assert (output == hidden).all()
+        # if (output == hidden).all():
+        logging.info(f"output: {output.max().item()}; hidden: {hidden.max().item()}")
+        # else:
+        #     print(f"output shape: {output.shape}; hidden shape: {hidden.shape}")
+        #     print(output)
+        #     print(hidden)
 
         embedded = embedded.squeeze(0)
         output = output.squeeze(0)
         weighted = weighted.squeeze(0)
 
-        prediction = self.fc_out(torch.cat((output, weighted, embedded),dim=1))
+        prediction = self.fc_out(torch.cat((output, weighted, embedded), dim=1))
         # prediction - [batch size, output dim]
-        return prediction, hidden.unsqueeze(0)
+        return prediction, hidden.squeeze(0)
+
 
 class Seq2Seq(nn.Module):
     def __init__(self, encoder, decoder, device):
@@ -102,9 +120,10 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.device = device
 
-    def forward(self,src, trg,teacher_forcing_ration=0.5):
+    def forward(self, src, trg, teacher_forcing_ration=0.5):
         # src = [src len, batch size]
         # trg = [trg len, batch size]
+        # assert torch.any(torch.isnan(src)), f"input: {src} exit nan"
         batch_size = src.shape[1]
         trg_len = trg.shape[0]
         trg_vocab_size = self.decoder.output_dim
@@ -114,8 +133,8 @@ class Seq2Seq(nn.Module):
         encoder_outputs, hidden = self.encoder(src)
 
         # first input to the decoder is the <sos> tokens
-        input = trg[0,:]
-        for t in range(1,trg_len):
+        input = trg[0, :]
+        for t in range(1, trg_len):
             # insert input token embedding, previous hidden state and all encoder hidden states
             # receive output tensor (predictions) and new hidden state
             output, hidden = self.decoder(input, hidden, encoder_outputs)
@@ -131,12 +150,7 @@ class Seq2Seq(nn.Module):
 
             # if teacher forcing, use actual next token as next input, if not, use predicted token
             input = trg[t] if teacher_force else top1
+        nn.utils.clip_grad_norm_(outputs, 10, error_if_nonfinite=False)
+        logging.info(f"outputs: {outputs.max().item()}")
         return outputs
 
-
-
-
-
-
-
-        pass

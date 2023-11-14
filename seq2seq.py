@@ -13,8 +13,6 @@ import math
 import time
 from tqdm import tqdm
 
-
-
 logging.basicConfig(level=logging.INFO, filename="seq2seq.log")
 
 SEED = 1234
@@ -52,7 +50,9 @@ class Seq2SeqRun():
         SRC = Field(tokenize=tokenize_de,
                     init_token='<sos>',
                     eos_token='<eos>',
-                    lower=True)
+                    lower=True,
+                    include_lengths=True
+                    )
 
         TRG = Field(tokenize=tokenize_en,
                     init_token='<sos>',
@@ -102,16 +102,49 @@ class Seq2SeqRun():
         logging.info(f"model structure:\{model}")
         return model
 
-    def model_gru(self, input_dim, output_dim, device="cpu"):
+    def model_lstm_padding(self, input_dim, output_dim, device="cpu"):
         # crete model
-        from models.seq2seq_gru import Seq2Seq, Encoder, Decoder, Attention
+        from models.seq2seq_lstm_padding import Seq2Seq, Encoder, Decoder, Attention
+
         INPUT_DIM = input_dim
         OUTPUT_DIM = output_dim
         ENC_EMB_DIM = 256
         DEC_EMB_DIM = 256
         ENC_HID_DIM = 512
         DEC_HID_DIM = 512
-        N_LAYERS = 2
+        ENC_DROPOUT = 0.5
+        DEC_DROPOUT = 0.5
+        SRC_PAD_IDX = 1
+
+        attn = Attention(ENC_HID_DIM, DEC_HID_DIM)
+        enc = Encoder(INPUT_DIM, ENC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, ENC_DROPOUT)
+        dec = Decoder(OUTPUT_DIM, DEC_EMB_DIM, ENC_HID_DIM, DEC_HID_DIM, DEC_DROPOUT, attn)
+
+        model = Seq2Seq(enc, dec, SRC_PAD_IDX, device).to(device)
+
+        def init_weights(m):
+            for name, param in m.named_parameters():
+                nn.init.uniform_(param.data, -0.08, 0.08)
+        try:
+            model_path = r"/Users/kuisu/Documents/Python/02_tutorial/BERT/tut1-model.pt"
+            if os.path.exists(model_path):
+                model.load_state_dict(torch.load(model_path))
+                logging.info(f"|load model params: {model_path}")
+        except Exception as e:
+            logging.info(f"|load model error: {e}")
+        model.apply(init_weights)
+        logging.info(f"model structure:\n{model}")
+        return model
+
+    def model_lstm(self, input_dim, output_dim, device="cpu"):
+        # crete model
+        from models.seq2seq_lstm import Seq2Seq, Encoder, Decoder, Attention
+        INPUT_DIM = input_dim
+        OUTPUT_DIM = output_dim
+        ENC_EMB_DIM = 256
+        DEC_EMB_DIM = 256
+        ENC_HID_DIM = 512
+        DEC_HID_DIM = 512
         ENC_DROPOUT = 0.5
         DEC_DROPOUT = 0.5
 
@@ -129,19 +162,33 @@ class Seq2SeqRun():
         logging.info(f"model structure:\{model}")
         return model
 
+    def test_iterator(self, iterator):
+        for i, batch in enumerate(iterator):
+            src = batch.src
+            trg = batch.trg
+
+            if torch.any(torch.isnan(src)):
+                for i in src:
+                    if torch.any(torch.isnan(i)):
+                        print("input error")
+                        print(i)
+
     def train(self, model, iterator, optimizer, criterion, clip):
 
         model.train()
 
         epoch_loss = 0
+        # self.test_iterator(iterator)
 
         for i, batch in enumerate(iterator):
-            src = batch.src
+            logging.info(f"|train|epoch: {i}")
+            # if i < 50: continue
+            src, src_len = batch.src
             trg = batch.trg
 
             optimizer.zero_grad()
 
-            output = model(src, trg)
+            output = model(src, src_len, trg)
 
             # trg = [trg len, batch size]
             # output = [trg len, batch size, output dim]
@@ -158,7 +205,7 @@ class Seq2SeqRun():
 
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+            nn.utils.clip_grad_norm_(model.parameters(), clip, error_if_nonfinite=False)
 
             optimizer.step()
 
@@ -175,10 +222,10 @@ class Seq2SeqRun():
 
         with torch.no_grad():
             for i, batch in enumerate(iterator):
-                src = batch.src
+                src, src_len = batch.src
                 trg = batch.trg
 
-                output = model(src, trg, 0)  # turn off teacher forcing
+                output = model(src, src_len, trg, 0)  # turn off teacher forcing
 
                 # trg = [trg len, batch size]
                 # output = [trg len, batch size, output dim]
@@ -217,18 +264,21 @@ class Seq2SeqRun():
         device = torch.device("mps")
         BATCH_SIZE = 128
         train_data, valid_data, test_data, SRC, TRG = self.load_data()
+        logging.info(f"|train|SRC PAD INDEX: {SRC.vocab.stoi[SRC.pad_token]}")
 
         train_iterator, valid_iterator, test_iterator = BucketIterator.splits(
             (train_data, valid_data, test_data),
             batch_size=BATCH_SIZE,
+            sort_within_batch=True,
+            sort_key=lambda x: len(x.src),
             device=device)
-        model = self.model_gru(len(SRC.vocab), len(TRG.vocab), device=device)
-        optimizer = optim.Adam(model.parameters())
+        model = self.model_lstm_padding(len(SRC.vocab), len(TRG.vocab), device=device)
+        optimizer = optim.Adam(model.parameters(), lr=1e-4)
         TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
 
         criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)  # 将pad的损失设置为0
 
-        N_EPOCHS = 2
+        N_EPOCHS = 3
         CLIP = 1
         best_valid_loss = float('inf')
         logging.info(f"|train|start ...")
