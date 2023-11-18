@@ -51,12 +51,14 @@ class Seq2SeqRun():
                     init_token='<sos>',
                     eos_token='<eos>',
                     lower=True,
-                    include_lengths=True
+                    include_lengths=True,
+                    batch_first=True
                     )
 
         TRG = Field(tokenize=tokenize_en,
                     init_token='<sos>',
                     eos_token='<eos>',
+                    batch_first=True,
                     lower=True)
         train_data, valid_data, test_data = Multi30k.splits(
             exts=('.de', '.en'),
@@ -136,6 +138,42 @@ class Seq2SeqRun():
         logging.info(f"model structure:\n{model}")
         return model
 
+    def model_conv1(self, input_dim, output_dim, device="cpu"):
+        # crete model
+        from models.seq2seq_conv1 import Seq2Seq, Encoder, Decoder
+
+        INPUT_DIM = input_dim
+        OUTPUT_DIM = output_dim
+        EMB_DIM = 256
+        HID_DIM = 512  # each conv. layer has 2 * hid_dim filters
+        ENC_LAYERS = 10  # number of conv. blocks in encoder
+        DEC_LAYERS = 10  # number of conv. blocks in decoder
+        ENC_KERNEL_SIZE = 3  # must be odd!
+        DEC_KERNEL_SIZE = 3  # can be even or odd
+        ENC_DROPOUT = 0.25
+        DEC_DROPOUT = 0.25
+        TRG_PAD_IDX = 1
+        MAX_LENGTH = 100
+
+        enc = Encoder(INPUT_DIM, EMB_DIM, HID_DIM, ENC_LAYERS, ENC_KERNEL_SIZE, ENC_DROPOUT, device, MAX_LENGTH)
+        dec = Decoder(OUTPUT_DIM, EMB_DIM, HID_DIM, DEC_LAYERS, DEC_KERNEL_SIZE, DEC_DROPOUT, TRG_PAD_IDX, device)
+
+        model = Seq2Seq(enc, dec).to(device)
+
+        def init_weights(m):
+            for name, param in m.named_parameters():
+                nn.init.uniform_(param.data, -0.08, 0.08)
+        # try:
+        #     model_path = r"/Users/kuisu/Documents/Python/02_tutorial/BERT/tut1-model.pt"
+        #     if os.path.exists(model_path):
+        #         model.load_state_dict(torch.load(model_path))
+        #         logging.info(f"|load model params: {model_path}")
+        # except Exception as e:
+        #     logging.info(f"|load model error: {e}")
+        model.apply(init_weights)
+        logging.info(f"model structure:\n{model}")
+        return model
+
     def model_lstm(self, input_dim, output_dim, device="cpu"):
         # crete model
         from models.seq2seq_lstm import Seq2Seq, Encoder, Decoder, Attention
@@ -188,15 +226,19 @@ class Seq2SeqRun():
 
             optimizer.zero_grad()
 
-            output = model(src, src_len, trg)
+            output, _ = model(src, trg[:,:-1])
 
             # trg = [trg len, batch size]
             # output = [trg len, batch size, output dim]
 
             output_dim = output.shape[-1]
 
-            output = output[1:].view(-1, output_dim)
-            trg = trg[1:].view(-1)
+            # RNN series
+            # output = output[1:].view(-1, output_dim)
+            # trg = trg[1:].view(-1)
+
+            output = output.contiguous().view(-1, output_dim)
+            trg = trg[:, 1:].contiguous().view(-1)
 
             # trg = [(trg len - 1) * batch size]
             # output = [(trg len - 1) * batch size, output dim]
@@ -225,15 +267,19 @@ class Seq2SeqRun():
                 src, src_len = batch.src
                 trg = batch.trg
 
-                output = model(src, src_len, trg, 0)  # turn off teacher forcing
+                # output,_ = model(src, src_len, trg, 0)  # lstm padding
+                output, _ = model(src, trg[:,:-1])  # turn off teacher forcing
 
                 # trg = [trg len, batch size]
                 # output = [trg len, batch size, output dim]
 
                 output_dim = output.shape[-1]
 
-                output = output[1:].view(-1, output_dim)
-                trg = trg[1:].view(-1)
+                # output = output[1:].view(-1, output_dim)
+                # trg = trg[1:].view(-1)
+
+                output = output.contiguous().view(-1, output_dim)
+                trg = trg[:, 1:].contiguous().view(-1)
 
                 # trg = [(trg len - 1) * batch size]
                 # output = [(trg len - 1) * batch size, output dim]
@@ -272,13 +318,13 @@ class Seq2SeqRun():
             sort_within_batch=True,
             sort_key=lambda x: len(x.src),
             device=device)
-        model = self.model_lstm_padding(len(SRC.vocab), len(TRG.vocab), device=device)
+        model = self.model_conv1(len(SRC.vocab), len(TRG.vocab), device=device)
         optimizer = optim.Adam(model.parameters(), lr=1e-4)
         TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
 
         criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)  # 将pad的损失设置为0
 
-        N_EPOCHS = 3
+        N_EPOCHS = 0
         CLIP = 1
         best_valid_loss = float('inf')
         logging.info(f"|train|start ...")
@@ -296,13 +342,13 @@ class Seq2SeqRun():
 
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
-                torch.save(model.state_dict(), 'tut1-model.pt')
+                torch.save(model.state_dict(), 'tut5-model.pt')
 
             logging.info(f'Epoch: {epoch + 1:02} | Time: {epoch_mins}m {epoch_secs}s')
             logging.info(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
             logging.info(f'\t Val. Loss: {valid_loss:.3f} |  Val. PPL: {math.exp(valid_loss):7.3f}')
 
-        model.load_state_dict(torch.load('tut1-model.pt'))
+        model.load_state_dict(torch.load('tut5-model.pt'))
 
         test_loss = self.evaluate(model, test_iterator, criterion)
 

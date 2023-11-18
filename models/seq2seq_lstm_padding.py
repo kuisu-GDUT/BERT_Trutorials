@@ -187,7 +187,7 @@ class Seq2Seq(nn.Module):
         mask = (src != self.src_pad_idx).permute(1, 0)
         return mask
 
-    def forward(self, src, src_len, trg, teacher_forcing_ratio=0.5):
+    def forward(self, src,  trg,src_len=128, teacher_forcing_ratio=0.5):
         # src = [src len, batch size]
         # src_len = [batch size]
         # trg = [trg len, batch size]
