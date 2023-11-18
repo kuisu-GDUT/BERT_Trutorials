@@ -92,3 +92,40 @@ test_iterator = Iterator(
 ```
 这里使用了 `BucketIterator, Iterator`, 因为BucketIterator可以自动选择长度类似的文本组成一个batch，
 所以用于训练数据，而测试数据一般不需要该操作。
+
+## NN
+### Embedding
+
+```python
+torch.nn.Embedding(num_embeddings, embedding_dim, padding_idx=None,
+ max_norm=None,  norm_type=2.0,   scale_grad_by_freq=False, 
+ sparse=False,  _weight=None)
+```
+> 简单的存储固定大小的词典的嵌入向量的查找表示。 输入为一个编号列表， 输出为对应符号的嵌入向量
+
+### Layer Norm
+在训练时， 对BN来说需要保持每个step的统计信息(均值和方差)。 在测试时， 由于变长句子的特性， 测试集可能出现比训练集更长的橘子， 
+所以对后面位置的step， 是没有训练的统计量使用的。
+![img.png](doc/layernormal.png)
+BN是对batch的纬度去做归一化， 也就是针对不同样本的特征做操作。 LN是对hidden的纬度去做归一化， 也就是针对单个样本的不同特征做操作。 因此LN可以不受样本数的限制。
+
+```python
+import torch
+
+
+class LayerNorm(nn.Module):
+    def __init__(self, features, eps=1e-6):
+        super(LayerNorm, self).__init__()
+        self.a_2 = nn.Parameter(torch.ones(features))
+        self.b_2 = nn.Parameter(torch.zeros(features))
+        self.eps = eps
+    
+    def forward(self, x):
+        # 统计每个样本所有纬度的值， 求均值和方差，所以就是在hidden dim上操作
+        # 相当于变成[bsz*max_len， hidden_dim]
+        mean = x.mean(-1, keepdim=True)
+        std = x.std(-1, keepdim=True)
+        # 注: 这里也是在最后一个纬度发生广播
+        return self.a_2*(x-mean)/(std+self.eps) + self.b_2
+
+```
