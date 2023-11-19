@@ -1,3 +1,6 @@
+## Tutorials
+收集优秀的Jupyter notebook about BERT and Transformer
+
 ## torch tutorial
 torchtext主要分为3部分: Field，Dataset，Iteration
 ### Field
@@ -127,5 +130,6 @@ class LayerNorm(nn.Module):
         std = x.std(-1, keepdim=True)
         # 注: 这里也是在最后一个纬度发生广播
         return self.a_2*(x-mean)/(std+self.eps) + self.b_2
-
 ```
+
+https://github.com/BritneyMuller/colab-notebooks/blob/master/BERT.ipynb
