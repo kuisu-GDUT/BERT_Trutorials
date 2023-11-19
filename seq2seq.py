@@ -128,7 +128,7 @@ class Seq2SeqRun():
             for name, param in m.named_parameters():
                 nn.init.uniform_(param.data, -0.08, 0.08)
         try:
-            model_path = r"/Users/kuisu/Documents/Python/02_tutorial/BERT/tut1-model.pt"
+            model_path = r"//tut1-model.pt"
             if os.path.exists(model_path):
                 model.load_state_dict(torch.load(model_path))
                 logging.info(f"|load model params: {model_path}")
@@ -164,7 +164,7 @@ class Seq2SeqRun():
             for name, param in m.named_parameters():
                 nn.init.uniform_(param.data, -0.08, 0.08)
         # try:
-        #     model_path = r"/Users/kuisu/Documents/Python/02_tutorial/BERT/tut1-model.pt"
+        #     model_path = r"/Users/kuisu/Documents/Python/02_tutorial/Trutorial_Transformer/tut1-model.pt"
         #     if os.path.exists(model_path):
         #         model.load_state_dict(torch.load(model_path))
         #         logging.info(f"|load model params: {model_path}")

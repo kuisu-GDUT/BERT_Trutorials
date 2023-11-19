@@ -28,7 +28,7 @@ logging.info(f"|batch 1 classify: {batch_1[1].value_counts()}")
 model_class, tokenizer_class, pretrained_weights = (
 ppb.DistilBertModel, ppb.DistilBertTokenizer, 'distilbert-base-uncased')
 
-## Want BERT instead of distilBERT? Uncomment the following line:
+## Want Trutorial_Transformer instead of distilBERT? Uncomment the following line:
 # model_class, tokenizer_class, pretrained_weights = (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
 
 # Load pretrained model/tokenizer
